@@ -18,7 +18,6 @@
 #include <string>
 #include <vector>
 
-#include <hardware_interface/visibility_control.h>
 #include <hardware_interface/hardware_info.hpp>
 #include <hardware_interface/system_interface.hpp>
 #include <hardware_interface/types/hardware_interface_return_values.hpp>
@@ -93,7 +92,7 @@ class FrankaMultiHardwareInterface : public hardware_interface::SystemInterface 
   std::map<std::string, ArmContainer> arms_;
   std::map<std::string, franka::RobotState*> state_pointers_;
 
-  ControlMode control_mode_;
+  ControlMode control_mode_ = ControlMode::None;  // initialize so prepare_command_mode_switch first-call check is deterministic
   // Commands
 
   static rclcpp::Logger getLogger();

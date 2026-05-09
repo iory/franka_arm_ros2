@@ -44,19 +44,21 @@ std::vector<StateInterface> FrankaHardwareInterface::export_state_interfaces() {
       info_.joints[i].name, hardware_interface::HW_IF_EFFORT, &hw_efforts_.at(i)));
   }
 
+  const std::string cart_pos_prefix = arm_id_ + "_ee_cartesian_position";
+  const std::string cart_vel_prefix = arm_id_ + "_ee_cartesian_velocity";
   for (auto i = 0; i < 16; i++){
     state_interfaces.emplace_back(StateInterface(
-        "ee_cartesian_position", cartesian_matrix_names[i], &hw_cartesian_positions_[i]));
+        cart_pos_prefix, cartesian_matrix_names[i], &hw_cartesian_positions_[i]));
     state_interfaces.emplace_back(StateInterface(
-        "ee_cartesian_velocity", cartesian_matrix_names[i], &hw_cartesian_velocities_[i]));
+        cart_vel_prefix, cartesian_matrix_names[i], &hw_cartesian_velocities_[i]));
   }
 
   state_interfaces.emplace_back(StateInterface(
-      k_robot_name, k_robot_state_interface_name,
+      arm_id_, k_robot_state_interface_name,
       reinterpret_cast<double*>(  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
           &hw_franka_robot_state_addr_)));
   state_interfaces.emplace_back(StateInterface(
-      k_robot_name, k_robot_model_interface_name,
+      arm_id_, k_robot_model_interface_name,
       reinterpret_cast<double*>(  // NOLINT(cppcoreguidelines-pro-type-reinterpret-cast)
           &hw_franka_model_ptr_)));
   
@@ -77,13 +79,15 @@ std::vector<CommandInterface> FrankaHardwareInterface::export_command_interfaces
     command_interfaces.emplace_back(CommandInterface( // JOINT VELOCITY
         info_.joints[i].name, hardware_interface::HW_IF_VELOCITY, &hw_commands_joint_velocity.at(i)));
   }
+  const std::string cart_pos_prefix_cmd = arm_id_ + "_ee_cartesian_position";
+  const std::string cart_vel_prefix_cmd = arm_id_ + "_ee_cartesian_velocity";
   for (auto i = 0; i < 16; i++){
     command_interfaces.emplace_back(CommandInterface(
-        "ee_cartesian_position", cartesian_matrix_names[i], &hw_commands_cartesian_position[i]));
+        cart_pos_prefix_cmd, cartesian_matrix_names[i], &hw_commands_cartesian_position[i]));
   }
   for (auto i = 0; i < 6; i++){
     command_interfaces.emplace_back(CommandInterface(
-        "ee_cartesian_velocity", cartesian_velocity_command_names[i], &hw_commands_cartesian_velocity[i]));
+        cart_vel_prefix_cmd, cartesian_velocity_command_names[i], &hw_commands_cartesian_velocity[i]));
   }
   // Franka ros provides:
   // joint torque, position, velocity
@@ -228,6 +232,17 @@ CallbackReturn FrankaHardwareInterface::on_init(const hardware_interface::Hardwa
     RCLCPP_FATAL(getLogger(), "Parameter 'robot_ip' ! set");
     return CallbackReturn::ERROR;
   }
+  // Optional arm_id parameter — when two FrankaHardwareInterface instances live
+  // in the same controller_manager (per-arm dual-arm setup), this both renames
+  // the exported state/command interface prefixes (so the two arms do not clash
+  // in ResourceStorage) and namespaces the error_recovery / param service nodes
+  // (so the service names do not clash either).
+  std::string arm_id_prefix;
+  auto it = info_.hardware_parameters.find("arm_id");
+  if (it != info_.hardware_parameters.end() && !it->second.empty()) {
+    arm_id_ = it->second;
+    arm_id_prefix = it->second + "_";
+  }
   try {
     RCLCPP_INFO(getLogger(), "Connecting to robot at \"%s\" ...", robot_ip.c_str());
     robot_ = std::make_unique<Robot>(robot_ip, getLogger());
@@ -239,8 +254,8 @@ CallbackReturn FrankaHardwareInterface::on_init(const hardware_interface::Hardwa
   RCLCPP_INFO(getLogger(), "Successfully connected to robot");
 
   // Start the service nodes
-  error_recovery_service_node_ = std::make_shared<FrankaErrorRecoveryServiceServer>(rclcpp::NodeOptions(), robot_);
-  param_service_node_ = std::make_shared<FrankaParamServiceServer>(rclcpp::NodeOptions(), robot_);
+  error_recovery_service_node_ = std::make_shared<FrankaErrorRecoveryServiceServer>(rclcpp::NodeOptions(), robot_, arm_id_prefix);
+  param_service_node_ = std::make_shared<FrankaParamServiceServer>(rclcpp::NodeOptions(), robot_, arm_id_prefix);
   executor_ = std::make_shared<FrankaExecutor>();
   executor_->add_node(error_recovery_service_node_);
   executor_->add_node(param_service_node_);

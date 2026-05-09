@@ -28,6 +28,7 @@
 #include <franka_msgs/action/grasp.hpp>
 #include <franka_msgs/action/homing.hpp>
 #include <franka_msgs/action/move.hpp>
+#include <franka_msgs/msg/gripper_state.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <sensor_msgs/msg/joint_state.hpp>
@@ -100,6 +101,7 @@ class GripperActionServer : public rclcpp::Node {
   std::mutex gripper_state_mutex_;
   franka::GripperState current_gripper_state_;
   rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr joint_states_publisher_;
+  rclcpp::Publisher<franka_msgs::msg::GripperState>::SharedPtr gripper_state_publisher_;
   rclcpp::TimerBase::SharedPtr timer_;
 
   double default_speed_;          // default gripper speed parameter value in m/s

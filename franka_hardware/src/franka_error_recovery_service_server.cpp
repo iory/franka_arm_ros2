@@ -22,9 +22,46 @@ void FrankaErrorRecoveryServiceServer::triggerAutomaticRecovery(const franka_msg
                                                                 const franka_msgs::srv::ErrorRecovery::Response::SharedPtr& response)
 {
     if(!this->robot_->hasError()){
-        RCLCPP_INFO(this->get_logger(), "No errors detected; error recovery is not necessary.");
-        response->error = "No errors";
-        response->success = false;
+        // If hasError() is false but the control thread has exited (typical
+        // aftermath of a previous error: doAutomaticErrorRecovery cleared
+        // the libfranka error, but stopRobot() was already called and the
+        // controller never re-armed), restart the control thread in
+        // whatever mode it last had. Without this the FrankaState topic
+        // stays frozen on the old REFLEX value and the controller cannot
+        // resume — the user has to deactivate/reactivate the controller
+        // manually. JSK ROS 1 franka_combinable_hw recovered automatically;
+        // this brings the LCAS path closer to that behaviour.
+        if(this->robot_->isStopped()){
+            auto current_cm = this->robot_->getControlMode();
+            std::lock_guard<std::mutex> lock(this->robot_->read_mutex_);
+            if(current_cm == ControlMode::None){
+                this->robot_->initializeContinuousReading();
+            }
+            else if(current_cm == ControlMode::JointTorque){
+                this->robot_->initializeTorqueControl();
+            }
+            else if(current_cm == ControlMode::JointPosition){
+                this->robot_->initializeJointPositionControl();
+            }
+            else if(current_cm == ControlMode::JointVelocity){
+                this->robot_->initializeJointVelocityControl();
+            }
+            else if(current_cm == ControlMode::CartesianPose){
+                this->robot_->initializeCartesianPositionControl();
+            }
+            else if(current_cm == ControlMode::CartesianVelocity){
+                this->robot_->initializeCartesianVelocityControl();
+            }
+            RCLCPP_INFO_STREAM(this->get_logger(),
+                "No active errors but control thread was stopped; restarted in " << current_cm);
+            response->error = "";
+            response->success = true;
+        }
+        else{
+            RCLCPP_INFO(this->get_logger(), "No errors detected; error recovery is not necessary.");
+            response->error = "No errors";
+            response->success = false;
+        }
     }
     else{
         try{

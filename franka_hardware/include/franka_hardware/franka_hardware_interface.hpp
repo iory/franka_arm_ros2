@@ -18,7 +18,6 @@
 #include <string>
 #include <vector>
 
-#include <hardware_interface/visibility_control.h>
 #include <hardware_interface/hardware_info.hpp>
 #include <hardware_interface/system_interface.hpp>
 #include <hardware_interface/types/hardware_interface_return_values.hpp>
@@ -91,7 +90,10 @@ class FrankaHardwareInterface : public hardware_interface::SystemInterface {
 
   static rclcpp::Logger getLogger();
 
-  const std::string k_robot_name{"panda"};
+  // Replaced by arm_id_ — the legacy const "panda" default lives on as the
+  // initial value of arm_id_ when no hardware_parameter "arm_id" is supplied.
+  std::string arm_id_{"panda"};
+  const std::string k_robot_name{"panda"};  // unused, kept for ABI
   const std::string k_robot_state_interface_name{"robot_state"};
   const std::string k_robot_model_interface_name{"robot_model"};
 };

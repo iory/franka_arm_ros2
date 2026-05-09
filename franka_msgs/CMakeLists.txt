@@ -20,6 +20,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/GraspEpsilon.msg"
   "msg/FrankaState.msg"
   "msg/Errors.msg"
+  "msg/GripperState.msg"
   DEPENDENCIES std_msgs builtin_interfaces
 )
 

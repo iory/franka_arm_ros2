@@ -140,18 +140,21 @@ CallbackReturn FrankaMultiHardwareInterface::on_init(const hardware_interface::H
   return CallbackReturn::SUCCESS;
 }
 
-// Function for extracting ns in joint names
+// Function for extracting ns in joint names.
+// Joint names follow the pattern '<arm_id>_joint<N>'. The original code used
+// s.find('_') (first underscore), which truncated arm_ids that themselves
+// contain an underscore — e.g. 'right_arm_joint1' -> 'right' instead of
+// 'right_arm'. That created a phantom arms_['right'] entry via operator[],
+// duplicating state interface keys with an empty prefix. Use the trailing
+// '_joint' marker instead.
 std::string get_ns(std::string const& s)
 {
-    std::string::size_type pos = s.find('_');
+    auto pos = s.rfind("_joint");
     if (pos != std::string::npos)
     {
         return s.substr(0, pos);
     }
-    else
-    {
-        return s;
-    }
+    return s;
 }
 
 // Function for extracting joint number
@@ -173,7 +176,7 @@ std::vector<StateInterface> FrankaMultiHardwareInterface::export_state_interface
       info_.joints[i].name, hardware_interface::HW_IF_EFFORT, &arms_[get_ns(info_.joints[i].name)].hw_efforts_.at(get_joint_no(info_.joints[i].name))));
   }
 
-  for(auto arm_container_pair : arms_){
+  for (auto& arm_container_pair : arms_){
     auto &arm = arm_container_pair.second;
 
     std::string cartesian_position_prefix = arm.robot_name_ + "_ee_cartesian_position";
@@ -215,7 +218,7 @@ std::vector<CommandInterface> FrankaMultiHardwareInterface::export_command_inter
         info_.joints[i].name, hardware_interface::HW_IF_VELOCITY, &arms_[get_ns(info_.joints[i].name)].hw_commands_joint_velocity_.at(get_joint_no(info_.joints[i].name))));
   }
 
-  for(auto arm_container_pair : arms_){
+  for (auto& arm_container_pair : arms_){
     auto &arm = arm_container_pair.second;
     std::string cartesian_position_prefix = arm.robot_name_ + "_ee_cartesian_position";
     std::string cartesian_velocity_prefix = arm.robot_name_ + "_ee_cartesian_velocity";
@@ -250,7 +253,7 @@ CallbackReturn FrankaMultiHardwareInterface::on_activate(
 CallbackReturn FrankaMultiHardwareInterface::on_deactivate(
     const rclcpp_lifecycle::State& /*previous_state*/) {
   RCLCPP_INFO(getLogger(), "trying to Stop...");
-  for(auto arm_container_pair : arms_){
+  for (auto& arm_container_pair : arms_){
     auto &arm = arm_container_pair.second;
     arm.robot_->stopRobot();
   }

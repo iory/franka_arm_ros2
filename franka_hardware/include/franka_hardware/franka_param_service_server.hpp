@@ -55,15 +55,20 @@ class FrankaParamServiceServer : public rclcpp::Node {
       param_setter_function(request);
       response->success = true;
     } catch (const franka::CommandException& command_exception) {
+      // Surface the actual libfranka message (e.g. "Set Load command
+      // rejected: command not possible in the current mode (Move)!") so
+      // callers can react to it. The previous generic string forced the
+      // user to ssh in and read the controller_manager log to find out
+      // what the controller actually rejected.
       RCLCPP_ERROR(this->get_logger(), "Command exception thrown during parameter setting %s",
                    command_exception.what());
       response->success = false;
-      response->error = "command exception error";
+      response->error = std::string("command exception: ") + command_exception.what();
     } catch (const franka::NetworkException& network_exception) {
       RCLCPP_ERROR(this->get_logger(), "Network exception thrown during parameter setting %s",
                    network_exception.what());
       response->success = false;
-      response->error = "network exception error";
+      response->error = std::string("network exception: ") + network_exception.what();
     }
   }
   

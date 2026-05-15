@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <exception>
 
 #include <franka/exception.h>
@@ -335,9 +337,18 @@ CallbackReturn FrankaHardwareInterface::on_init(const hardware_interface::Hardwa
     RCLCPP_INFO(getLogger(), "Connecting to robot at \"%s\" ...", robot_ip.c_str());
     robot_ = std::make_unique<Robot>(robot_ip, getLogger());
   } catch (const franka::Exception& e) {
-    RCLCPP_FATAL(getLogger(), "Could ! connect to robot");
-    RCLCPP_FATAL(getLogger(), "%s", e.what());
-    return CallbackReturn::ERROR;
+    // RCLCPP_FATAL goes through rcutils, which honours
+    // RCUTILS_COLORIZED_OUTPUT=1 (set in the launch env) and emits red
+    // ANSI escapes before launch processes the line — more reliable
+    // than writing escapes manually from a child process, which launch's
+    // 'screen' output handler can strip. std::exit(1) then kills
+    // ros2_control_node so the launch's on_exit Shutdown can tear the
+    // whole stack down (instead of leaving the controller_manager
+    // spinning on 'Waiting for robot_description').
+    RCLCPP_FATAL(getLogger(),
+        "Could not connect to robot at %s: %s",
+        robot_ip.c_str(), e.what());
+    std::exit(1);
   }
   RCLCPP_INFO(getLogger(), "Successfully connected to robot");
 

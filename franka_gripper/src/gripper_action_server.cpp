@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <future>
 #include <memory>
@@ -72,8 +74,15 @@ GripperActionServer::GripperActionServer(const rclcpp::NodeOptions& options)
   try {
     this->gripper_ = std::make_unique<franka::Gripper>(robot_ip);
   } catch (const franka::Exception& exception) {
-    RCLCPP_FATAL(this->get_logger(), exception.what());
-    throw exception;
+    // RCLCPP_FATAL + RCUTILS_COLORIZED_OUTPUT=1 (set in the parent launch)
+    // gives a red banner the user actually sees, instead of the bare
+    // "terminate called after throwing" the C++ runtime produced when
+    // we just re-threw. std::exit(1) then lets the launch's on_exit
+    // Shutdown tear the rest down without leaving a half-running stack.
+    RCLCPP_FATAL(this->get_logger(),
+        "Could not connect to gripper at %s: %s",
+        robot_ip.c_str(), exception.what());
+    std::exit(1);
   }
   RCLCPP_INFO(this->get_logger(), "Connected to gripper");
   current_gripper_state_ = gripper_->readOnce();

@@ -16,6 +16,7 @@ option(CHECK_TIDY "Adds clang-tidy tests" OFF)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(franka_msgs REQUIRED)
+find_package(controller_manager_msgs REQUIRED)
 find_package(hardware_interface REQUIRED)
 find_package(pluginlib REQUIRED)
 find_package(Franka REQUIRED) # Franka_DIR will provide the path to the libfranka installation
@@ -45,6 +46,7 @@ ament_target_dependencies(
         pluginlib
         rclcpp
         franka_msgs
+        controller_manager_msgs
 )
 
 pluginlib_export_plugin_description_file(hardware_interface franka_hardware.xml)

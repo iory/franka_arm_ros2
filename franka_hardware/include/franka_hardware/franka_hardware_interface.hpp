@@ -24,6 +24,9 @@
 #include <rclcpp/logger.hpp>
 #include <rclcpp/macros.hpp>
 #include <rclcpp/rclcpp.hpp>
+#include <atomic>
+#include <thread>
+#include <controller_manager_msgs/srv/switch_controller.hpp>
 #include <rclcpp_lifecycle/state.hpp>
 
 #include "franka_hardware/franka_executor.hpp"
@@ -96,5 +99,30 @@ class FrankaHardwareInterface : public hardware_interface::SystemInterface {
   const std::string k_robot_name{"panda"};  // unused, kept for ABI
   const std::string k_robot_state_interface_name{"robot_state"};
   const std::string k_robot_model_interface_name{"robot_model"};
+
+  // GUIDING auto-pause (patch (h+)). When the operator engages
+  // hand-guiding (press the Guiding Button on the Pilot-Grip while
+  // half-pressing the Enabling Button), libfranka switches
+  // robot_mode to kGuiding. The selected mode (Translation /
+  // Rotation / Free / User on the Guiding-Mode Button) does not
+  // matter here — kGuiding covers all of them. We do two things:
+  //  1) write() zeroes commanded torque / velocity and pins commanded
+  //     position to actual so JTC tracking does not fight back.
+  //  2) An auxiliary thread watches the in_guiding_ flag and calls
+  //     /controller_manager/switch_controller to deactivate this arm's
+  //     trajectory controller on the way in, and re-activate it on the
+  //     way out — JTC.on_activate then samples actual as the new hold
+  //     pose instead of jerking back to the pre-GUIDING trajectory
+  //     target.
+  // controller_name_ is the optional hardware parameter
+  // "controller_name". When empty, the supervisor branch stays off and
+  // only the torque-zero path in write() runs.
+  std::string controller_name_;
+  std::atomic<bool> in_guiding_{false};
+  std::atomic<bool> finish_watch_{false};
+  std::thread guiding_watch_thread_;
+  rclcpp::Node::SharedPtr ext_node_;
+  rclcpp::Client<controller_manager_msgs::srv::SwitchController>::SharedPtr switch_cli_;
+  void guidingWatchLoop();
 };
 }  // namespace franka_hardware

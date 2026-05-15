@@ -11,6 +11,7 @@
 
   <depend>rclcpp</depend>
   <depend>franka_msgs</depend>
+  <depend>controller_manager_msgs</depend>
   <depend>hardware_interface</depend>
   <depend>pluginlib</depend>
 

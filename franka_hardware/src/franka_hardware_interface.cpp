@@ -103,6 +103,19 @@ CallbackReturn FrankaHardwareInterface::on_activate(
   hw_commands_joint_effort.fill(0);
   read(rclcpp::Time(0),
        rclcpp::Duration(0, 0));  // makes sure that the robot state is properly initialized.
+
+  // GUIDING auto-pause supervisor: spawn a small thread + auxiliary
+  // node only when controller_name was supplied (see on_init).
+  if (!controller_name_.empty() && !ext_node_) {
+    ext_node_ = std::make_shared<rclcpp::Node>(
+        arm_id_ + "_guiding_supervisor",
+        rclcpp::NodeOptions().automatically_declare_parameters_from_overrides(true));
+    switch_cli_ = ext_node_->create_client<controller_manager_msgs::srv::SwitchController>(
+        "/controller_manager/switch_controller");
+    finish_watch_ = false;
+    guiding_watch_thread_ = std::thread([this]() { this->guidingWatchLoop(); });
+  }
+
   RCLCPP_INFO(getLogger(), "Started");
   return CallbackReturn::SUCCESS;
 }
@@ -110,9 +123,48 @@ CallbackReturn FrankaHardwareInterface::on_activate(
 CallbackReturn FrankaHardwareInterface::on_deactivate(
     const rclcpp_lifecycle::State& /*previous_state*/) {
   RCLCPP_INFO(getLogger(), "trying to Stop...");
+  finish_watch_ = true;
+  if (guiding_watch_thread_.joinable()) {
+    guiding_watch_thread_.join();
+  }
+  switch_cli_.reset();
+  ext_node_.reset();
   robot_->stopRobot();
   RCLCPP_INFO(getLogger(), "Stopped");
   return CallbackReturn::SUCCESS;
+}
+
+void FrankaHardwareInterface::guidingWatchLoop() {
+  // Wait for controller_manager service to become available (we are
+  // loaded by it, but service discovery still needs a moment).
+  if (!switch_cli_->wait_for_service(std::chrono::seconds(5))) {
+    RCLCPP_WARN(getLogger(),
+                "switch_controller service did not appear within 5s — "
+                "GUIDING auto-pause for controller '%s' is disabled.",
+                controller_name_.c_str());
+    return;
+  }
+  bool prev = false;
+  while (!finish_watch_.load()) {
+    bool cur = in_guiding_.load();
+    if (cur != prev) {
+      auto req = std::make_shared<controller_manager_msgs::srv::SwitchController::Request>();
+      if (cur) {
+        req->deactivate_controllers.push_back(controller_name_);
+        RCLCPP_INFO(getLogger(),
+                    "GUIDING entered: deactivating '%s'", controller_name_.c_str());
+      } else {
+        req->activate_controllers.push_back(controller_name_);
+        RCLCPP_INFO(getLogger(),
+                    "GUIDING exited: re-activating '%s' (will hold at user's pose)",
+                    controller_name_.c_str());
+      }
+      req->strictness = controller_manager_msgs::srv::SwitchController::Request::BEST_EFFORT;
+      switch_cli_->async_send_request(req);
+      prev = cur;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
 }
 
 hardware_interface::return_type FrankaHardwareInterface::read(const rclcpp::Time& /*time*/,
@@ -159,13 +211,36 @@ hardware_interface::return_type FrankaHardwareInterface::write(const rclcpp::Tim
     //RCLCPP_INFO(getLogger(), "write error");
     // as soon as an error is returned, it prevents read/write from running in the control node loop.
     // Need a way to make it recover from it...
-    //return hardware_interface::return_type::ERROR; 
+    //return hardware_interface::return_type::ERROR;
     return hardware_interface::return_type::OK;
   }
-  robot_->write(hw_commands_joint_effort, 
-                hw_commands_joint_position, 
-                hw_commands_joint_velocity, 
-                hw_commands_cartesian_position, 
+
+  // GUIDING auto-pause (patch (h+)): if libfranka is in kGuiding
+  // (operator pressed the Guiding Button on the Pilot-Grip while
+  // half-pressing the Enabling Button), zero the user-supplied torque /
+  // velocity commands and pin commanded position to current actual.
+  // Without this, JTC's tracking PID fights the user's motion. The
+  // atomic flag is observed by guidingWatchLoop() which then calls
+  // /controller_manager/switch_controller to deactivate the trajectory
+  // controller — that way, when GUIDING ends, JTC.on_activate samples
+  // actual as the new hold pose instead of jerking back to the old
+  // trajectory target.
+  const bool guiding =
+    (hw_franka_robot_state_.robot_mode == franka::RobotMode::kGuiding);
+  in_guiding_.store(guiding);
+  if (guiding) {
+    auto effort_zero = hw_commands_joint_effort;     effort_zero.fill(0.0);
+    auto vel_zero    = hw_commands_joint_velocity;   vel_zero.fill(0.0);
+    auto pos_hold    = hw_franka_robot_state_.q;     // hold at actual
+    robot_->write(effort_zero, pos_hold, vel_zero,
+                  hw_commands_cartesian_position,
+                  hw_commands_cartesian_velocity);
+    return hardware_interface::return_type::OK;
+  }
+  robot_->write(hw_commands_joint_effort,
+                hw_commands_joint_position,
+                hw_commands_joint_velocity,
+                hw_commands_cartesian_position,
                 hw_commands_cartesian_velocity);
   //RCLCPP_INFO(getLogger(), "write end");
   return hardware_interface::return_type::OK;
@@ -242,6 +317,19 @@ CallbackReturn FrankaHardwareInterface::on_init(const hardware_interface::Hardwa
   if (it != info_.hardware_parameters.end() && !it->second.empty()) {
     arm_id_ = it->second;
     arm_id_prefix = it->second + "_";
+  }
+  // Optional controller_name — name of the trajectory controller that
+  // owns this arm's command interfaces. When supplied, GUIDING-mode
+  // detection (white button held on the hand) auto-deactivates that
+  // controller and re-activates it on release, so JTC.on_activate
+  // resamples the user's pose as the new hold pose. When empty, the
+  // supervisor branch is disabled and only the torque-zero path in
+  // write() runs (still useful — the arm becomes immediately compliant
+  // — but JTC will jerk back to its old target when GUIDING ends, so
+  // setting controller_name is strongly recommended).
+  auto cit = info_.hardware_parameters.find("controller_name");
+  if (cit != info_.hardware_parameters.end()) {
+    controller_name_ = cit->second;
   }
   try {
     RCLCPP_INFO(getLogger(), "Connecting to robot at \"%s\" ...", robot_ip.c_str());

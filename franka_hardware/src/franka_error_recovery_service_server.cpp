@@ -109,6 +109,24 @@ void FrankaErrorRecoveryServiceServer::triggerAutomaticRecovery(const franka_msg
             response->error = e.what();
             response->success = false;
         }
+        catch(franka::CommandException& e){
+            // libfranka throws CommandException when error recovery is
+            // requested while the robot is in a state that does not accept
+            // the command — most commonly "User stopped" (E-stop pressed)
+            // or other operator-locked states. Without this catch the
+            // exception propagates out of the rclcpp service handler and
+            // terminates the controller_manager process. Reporting it as
+            // a service failure lets the caller decide what to do (eg.
+            // wait for the operator to release E-stop and retry).
+            RCLCPP_ERROR(this->get_logger(), "Error recovery rejected by libfranka: %s", e.what());
+            response->error = e.what();
+            response->success = false;
+        }
+        catch(const std::exception& e){
+            RCLCPP_ERROR(this->get_logger(), "Error recovery threw: %s", e.what());
+            response->error = e.what();
+            response->success = false;
+        }
     }
 };
 

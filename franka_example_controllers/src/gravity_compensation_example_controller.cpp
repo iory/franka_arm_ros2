@@ -39,7 +39,12 @@ controller_interface::return_type GravityCompensationExampleController::update(
     const rclcpp::Time& /*time*/,
     const rclcpp::Duration& /*period*/) {
   for (auto& command_interface : command_interfaces_) {
-    command_interface.set_value(0);
+    // Must be a double literal. Jazzy's hardware_interface checks the
+    // set_value type at runtime; the upstream literal ``0`` is parsed
+    // as int and throws "Invalid data type : 'int' access for interface
+    // ..._joint*/effort expected : 'double'", deactivating the controller
+    // immediately on its first update.
+    command_interface.set_value(0.0);
   }
   return controller_interface::return_type::OK;
 }
